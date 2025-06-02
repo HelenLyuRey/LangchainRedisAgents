@@ -2,7 +2,7 @@
 import redis
 import json
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from config import Config
 
@@ -118,6 +118,101 @@ class RedisManager:
         """Delete cached value"""
         return bool(self.redis_client.delete(f"cache:{key}"))
     
+    # ========== STEP 5 : Domain-Specific Caching Methods ==========
+    
+    def cache_order(self, order_id: str, order_data: Dict, ttl: int = 1800) -> bool:
+        """Cache order data with 30-minute TTL (orders don't change often)"""
+        cache_key = f"order:{order_id}"
+        cached_data = {
+            "data": order_data,
+            "cached_at": datetime.now().isoformat(),
+            "cache_type": "order"
+        }
+        return self.cache_set(cache_key, cached_data, ttl)
+    
+    def get_cached_order(self, order_id: str) -> Optional[Dict]:
+        """Get cached order data"""
+        cache_key = f"order:{order_id}"
+        cached_data = self.cache_get(cache_key)
+        
+        if cached_data and isinstance(cached_data, dict):
+            return cached_data.get("data")
+        return None
+    
+    def cache_faq_search(self, query: str, results: List[Tuple], ttl: int = 3600) -> bool:
+        """Cache FAQ search results with 1-hour TTL - STEP 5 FIX: Handle tuple conversion"""
+        # Normalize query for consistent caching
+        normalized_query = query.lower().strip()
+        cache_key = f"faq_search:{hash(normalized_query)}"
+        
+        # Convert tuples to lists for JSON serialization
+        serializable_results = []
+        for result in results:
+            if isinstance(result, tuple):
+                serializable_results.append(list(result))
+            else:
+                serializable_results.append(result)
+        
+        cached_data = {
+            "query": query,
+            "results": serializable_results,
+            "cached_at": datetime.now().isoformat(),
+            "cache_type": "faq_search"
+        }
+        return self.cache_set(cache_key, cached_data, ttl)
+    
+    def get_cached_faq_search(self, query: str) -> Optional[List[Tuple]]:
+        """Get cached FAQ search results - STEP 5 FIX: Convert lists back to tuples"""
+        normalized_query = query.lower().strip()
+        cache_key = f"faq_search:{hash(normalized_query)}"
+        cached_data = self.cache_get(cache_key)
+        
+        if cached_data and isinstance(cached_data, dict):
+            results = cached_data.get("results")
+            if results:
+                # Convert lists back to tuples
+                tuple_results = []
+                for result in results:
+                    if isinstance(result, list):
+                        tuple_results.append(tuple(result))
+                    else:
+                        tuple_results.append(result)
+                return tuple_results
+        return None
+    
+    def cache_order_summary(self, order_id: str, summary: str, ttl: int = 1800) -> bool:
+        """Cache order status summary"""
+        cache_key = f"order_summary:{order_id}"
+        cached_data = {
+            "summary": summary,
+            "cached_at": datetime.now().isoformat(),
+            "cache_type": "order_summary"
+        }
+        return self.cache_set(cache_key, cached_data, ttl)
+    
+    def get_cached_order_summary(self, order_id: str) -> Optional[str]:
+        """Get cached order status summary"""
+        cache_key = f"order_summary:{order_id}"
+        cached_data = self.cache_get(cache_key)
+        
+        if cached_data and isinstance(cached_data, dict):
+            return cached_data.get("summary")
+        return None
+    
+    def invalidate_order_cache(self, order_id: str) -> int:
+        """Invalidate all cached data for an order (when order status changes)"""
+        patterns = [
+            f"cache:order:{order_id}",
+            f"cache:order_summary:{order_id}"
+        ]
+        
+        deleted_count = 0
+        for pattern in patterns:
+            if self.redis_client.delete(pattern):
+                deleted_count += 1
+                
+        return deleted_count
+    
     # ========== Session Management ==========
     
     def create_session(self, session_id: str, user_data: Dict[str, Any] = None) -> bool:
@@ -169,6 +264,42 @@ class RedisManager:
         session_keys = self.redis_client.keys("session:*")
         return [key.replace("session:", "") for key in session_keys]
     
+    # ========== STEP 5: Agent State Management ==========
+    
+    def set_agent_state(self, session_id: str, agent_name: str, state_data: Dict, ttl: int = 3600) -> bool:
+        """Store agent-specific state for a session"""
+        state_key = f"agent_state:{session_id}:{agent_name}"
+        state_with_metadata = {
+            "agent": agent_name,
+            "session_id": session_id,
+            "state": state_data,
+            "updated_at": datetime.now().isoformat()
+        }
+        return self.cache_set(state_key, state_with_metadata, ttl)
+    
+    def get_agent_state(self, session_id: str, agent_name: str) -> Optional[Dict]:
+        """Get agent-specific state for a session"""
+        state_key = f"agent_state:{session_id}:{agent_name}"
+        cached_data = self.cache_get(state_key)
+        
+        if cached_data and isinstance(cached_data, dict):
+            return cached_data.get("state")
+        return None
+    
+    def clear_agent_state(self, session_id: str, agent_name: str = None) -> int:
+        """Clear agent state(s) for a session"""
+        if agent_name:
+            # Clear specific agent state
+            state_key = f"cache:agent_state:{session_id}:{agent_name}"
+            return self.redis_client.delete(state_key)
+        else:
+            # Clear all agent states for session
+            pattern = f"cache:agent_state:{session_id}:*"
+            keys = self.redis_client.keys(pattern)
+            if keys:
+                return self.redis_client.delete(*keys)
+            return 0
+    
     # ========== Utility Methods ==========
     
     def get_stats(self) -> Dict[str, Any]:
@@ -180,6 +311,11 @@ class RedisManager:
         session_count = len(self.redis_client.keys("session:*"))
         cache_count = len(self.redis_client.keys("cache:*"))
         
+        # STEP 5: Count domain-specific cache types
+        order_cache_count = len(self.redis_client.keys("cache:order:*"))
+        faq_cache_count = len(self.redis_client.keys("cache:faq_search:*"))
+        agent_state_count = len(self.redis_client.keys("cache:agent_state:*"))
+        
         return {
             "redis_version": info.get("redis_version"),
             "connected_clients": info.get("connected_clients"),
@@ -187,7 +323,10 @@ class RedisManager:
             "total_keys": info.get("db0", {}).get("keys", 0),
             "conversations": conversation_count,
             "sessions": session_count,
-            "cached_items": cache_count
+            "cached_items": cache_count,
+            "order_cache": order_cache_count,
+            "faq_cache": faq_cache_count,
+            "agent_states": agent_state_count
         }
     
     def cleanup_expired(self) -> Dict[str, int]:
