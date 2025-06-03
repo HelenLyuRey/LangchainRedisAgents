@@ -159,7 +159,11 @@ class RedisManager:
             "cached_at": datetime.now().isoformat(),
             "cache_type": "faq_search"
         }
-        return self.cache_set(cache_key, cached_data, ttl)
+        
+        success = self.cache_set(cache_key, cached_data, ttl)
+        if success:
+            print(f"💾 Cached {len(results)} FAQ search results for: '{query}'")  # STEP 6: FIX - Consistent message format
+        return success
     
     def get_cached_faq_search(self, query: str) -> Optional[List[Tuple]]:
         """Get cached FAQ search results - STEP 5 FIX: Convert lists back to tuples"""

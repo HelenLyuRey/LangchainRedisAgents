@@ -67,19 +67,19 @@ class AgentRouter:
         """Calculate confidence score for order-related queries"""
         score = 0.0
         
-        # Check for order patterns
+        # Check for order patterns (higher weights for exact matches)
         for pattern in self.order_patterns:
             if re.search(pattern, message, re.IGNORECASE):
-                score += 0.3
+                score += 0.4  # STEP 6: FIX - Increased from 0.3 for better confidence
         
         # Boost score for specific order-related keywords
         order_keywords = {
-            "order": 0.2,
-            "tracking": 0.3,
-            "delivery": 0.2,
-            "shipped": 0.3,
-            "delivered": 0.3,
-            "status": 0.1
+            "order": 0.3,  # Increased
+            "tracking": 0.4,  # Increased
+            "delivery": 0.3,  # Increased
+            "shipped": 0.4,
+            "delivered": 0.4,
+            "status": 0.2  # Increased
         }
         
         for keyword, weight in order_keywords.items():
@@ -88,7 +88,7 @@ class AgentRouter:
         
         # Check for email pattern (might be searching orders by email)
         if re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', message):
-            score += 0.4
+            score += 0.5  # Increased from 0.4
         
         return min(score, 1.0)  # Cap at 1.0
     

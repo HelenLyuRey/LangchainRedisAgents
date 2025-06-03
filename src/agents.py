@@ -293,38 +293,38 @@ class FAQAgent(BaseAgent):
             except Exception as e:
                 return f"❌ Error searching FAQ: {str(e)}"
         
-        def get_contact_info_tool() -> str:
+        def get_contact_info_tool(query: str = "") -> str:  # STEP 6: FIX - Added parameter
             """Get customer support contact information"""
             return """📞 **Customer Support Contact Information:**
 
-**Email:** support@example.com
-**Phone:** 1-800-SUPPORT (1-800-786-7678)
-**Hours:** Monday-Friday, 9AM-6PM EST
+    **Email:** support@example.com
+    **Phone:** 1-800-SUPPORT (1-800-786-7678)
+    **Hours:** Monday-Friday, 9AM-6PM EST
 
-**Live Chat:** Available 24/7 on our website
-**Response Time:** 
-- Live Chat: Immediate
-- Email: Within 24 hours  
-- Phone: Immediate during business hours
+    **Live Chat:** Available 24/7 on our website
+    **Response Time:** 
+    - Live Chat: Immediate
+    - Email: Within 24 hours  
+    - Phone: Immediate during business hours
 
-For urgent order issues, please call our phone line during business hours."""
+    For urgent order issues, please call our phone line during business hours."""
         
-        def get_business_hours_tool() -> str:
+        def get_business_hours_tool(query: str = "") -> str:  # STEP 6: FIX - Added parameter
             """Get business hours and availability information"""
             return """🕒 **Business Hours & Availability:**
 
-**Customer Support:**
-- Phone: Monday-Friday, 9AM-6PM EST
-- Live Chat: 24/7 available on website
-- Email: Responses within 24 hours
+    **Customer Support:**
+    - Phone: Monday-Friday, 9AM-6PM EST
+    - Live Chat: 24/7 available on website
+    - Email: Responses within 24 hours
 
-**Order Processing:**
-- Orders placed before 2PM EST ship same day
-- Weekend orders processed on Monday
-- Holiday schedules may vary
+    **Order Processing:**
+    - Orders placed before 2PM EST ship same day
+    - Weekend orders processed on Monday
+    - Holiday schedules may vary
 
-**Store Hours:** Online store available 24/7
-**Warehouse Operations:** Monday-Friday, 8AM-5PM EST"""
+    **Store Hours:** Online store available 24/7
+    **Warehouse Operations:** Monday-Friday, 8AM-5PM EST"""
         
         self.tools = [
             Tool(
