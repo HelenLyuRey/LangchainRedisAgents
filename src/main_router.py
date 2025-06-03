@@ -1,4 +1,4 @@
-# src/main_router.py - STEP 7: Main orchestration system
+# src/main_router.py - STEP 7: Fixed version with improved error handling
 import sys
 import os
 from typing import Dict, List, Optional, Tuple, Any
@@ -52,11 +52,15 @@ class CustomerSupportRouter:
         self.faq_agent.faq_cache.preload_common_faqs(common_faq_queries)
         print("✅ System warmed up and ready")
     
-    def start_session(self, session_id: str, user_data: Dict = None) -> Dict[str, Any]:
+    def start_session(self, session_id: str, user_data: Optional[Dict] = None) -> Dict[str, Any]:
         """Start a new customer support session"""
         
+        # STEP 7 FIX: Ensure user_data is never None
+        if user_data is None:
+            user_data = {}
+        
         # Create session in Redis
-        session_created = self.redis.create_session(session_id, user_data or {})
+        session_created = self.redis.create_session(session_id, user_data)
         
         if session_created:
             # Initialize conversation state
@@ -87,8 +91,13 @@ class CustomerSupportRouter:
     
     def _generate_welcome_message(self, user_data: Dict) -> str:
         """Generate personalized welcome message"""
-        name = user_data.get("name", "")
-        greeting = f"Hello {name}! " if name else "Hello! "
+        # STEP 7 FIX: Safe access to user_data with fallback
+        try:
+            name = user_data.get("name", "") if user_data else ""
+            greeting = f"Hello {name}! " if name else "Hello! "
+        except (AttributeError, TypeError):
+            # Fallback if user_data is not a dict or is None
+            greeting = "Hello! "
         
         welcome = f"""{greeting}👋 Welcome to Customer Support!
 
@@ -119,6 +128,16 @@ How can I assist you today?"""
         """Process a customer message through the router system"""
         
         try:
+            # STEP 7 FIX: Input validation
+            if not message or not message.strip():
+                return {
+                    "success": False,
+                    "response": "❌ Please provide a message. Type '/help' for assistance.",
+                    "agent_used": "input_validator"
+                }
+            
+            message = message.strip()
+            
             # Update session activity
             self.redis.update_session_activity(session_id)
             
@@ -126,8 +145,15 @@ How can I assist you today?"""
             if message.startswith("/"):
                 return self._handle_command(session_id, message)
             
-            # Get conversation state
-            conv_state = self.conversation_states.get(session_id, {})
+            # Get or initialize conversation state
+            conv_state = self.conversation_states.get(session_id, {
+                "active_agent": None,
+                "agent_switches": 0,
+                "resolved_issues": [],
+                "session_start": datetime.now().isoformat(),
+                "message_count": 0
+            })
+            
             conv_state["message_count"] = conv_state.get("message_count", 0) + 1
             
             # Route the message to appropriate agent
@@ -143,7 +169,18 @@ How can I assist you today?"""
             
             # Process with selected agent
             start_time = datetime.now()
-            agent = self.agents[selected_agent]
+            agent = self.agents.get(selected_agent)
+            
+            # STEP 7 FIX: Handle missing agent gracefully
+            if not agent:
+                error_response = f"❌ Unknown agent type: {selected_agent}. Please try again or contact support."
+                self.redis.add_message(session_id, "assistant", error_response)
+                return {
+                    "success": False,
+                    "response": error_response,
+                    "agent_used": "error_handler"
+                }
+            
             response = agent.process_message(message, session_id)
             processing_time = (datetime.now() - start_time).total_seconds()
             
@@ -156,7 +193,7 @@ How can I assist you today?"""
             # Detect if issue was resolved
             resolution_indicators = ["thank you", "thanks", "that helps", "perfect", "great"]
             if any(indicator in message.lower() for indicator in resolution_indicators):
-                conv_state["resolved_issues"].append({
+                conv_state.setdefault("resolved_issues", []).append({
                     "agent": selected_agent,
                     "timestamp": datetime.now().isoformat(),
                     "message": message[:100]  # Store first 100 chars
@@ -173,17 +210,26 @@ How can I assist you today?"""
             }
             
         except Exception as e:
-            error_response = f"❌ I apologize, but I encountered an error processing your request: {str(e)}"
+            # STEP 7 FIX: Improved error handling with more context
+            error_response = f"❌ I apologize, but I encountered an error processing your request. Please try again or contact support if the issue persists."
             
             # Still add messages to history for debugging
-            self.redis.add_message(session_id, "user", message)
-            self.redis.add_message(session_id, "assistant", error_response)
+            try:
+                self.redis.add_message(session_id, "user", message)
+                self.redis.add_message(session_id, "assistant", error_response)
+            except:
+                pass  # Don't let Redis errors compound the problem
             
             return {
                 "success": False,
                 "response": error_response,
                 "error": str(e),
-                "agent_used": "error_handler"
+                "agent_used": "error_handler",
+                "debug_info": {
+                    "session_id": session_id,
+                    "message_length": len(message) if message else 0,
+                    "error_type": type(e).__name__
+                }
             }
     
     def _handle_command(self, session_id: str, command: str) -> Dict[str, Any]:
@@ -218,48 +264,76 @@ Just type your question naturally - I'll route it to the right specialist!"""
             }
         
         elif command == "/status":
-            status = self._get_detailed_session_status(session_id)
-            return {
-                "success": True,
-                "response": status,
-                "agent_used": "command_handler"
-            }
+            try:
+                status = self._get_detailed_session_status(session_id)
+                return {
+                    "success": True,
+                    "response": status,
+                    "agent_used": "command_handler"
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "response": f"❌ Error retrieving session status: {str(e)}",
+                    "agent_used": "command_handler"
+                }
         
         elif command == "/history":
-            history = self._get_conversation_summary(session_id)
-            return {
-                "success": True,
-                "response": history,
-                "agent_used": "command_handler"
-            }
+            try:
+                history = self._get_conversation_summary(session_id)
+                return {
+                    "success": True,
+                    "response": history,
+                    "agent_used": "command_handler"
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "response": f"❌ Error retrieving conversation history: {str(e)}",
+                    "agent_used": "command_handler"
+                }
         
         elif command == "/clear":
-            cleared = self.redis.clear_conversation(session_id)
-            
-            # Reset conversation state
-            if session_id in self.conversation_states:
-                self.conversation_states[session_id] = {
-                    "active_agent": None,
-                    "agent_switches": 0,
-                    "resolved_issues": [],
-                    "session_start": datetime.now().isoformat(),
-                    "message_count": 0
+            try:
+                cleared = self.redis.clear_conversation(session_id)
+                
+                # Reset conversation state
+                if session_id in self.conversation_states:
+                    self.conversation_states[session_id] = {
+                        "active_agent": None,
+                        "agent_switches": 0,
+                        "resolved_issues": [],
+                        "session_start": datetime.now().isoformat(),
+                        "message_count": 0
+                    }
+                
+                response = "✅ Conversation history cleared. How can I help you?" if cleared else "❌ Failed to clear history."
+                return {
+                    "success": cleared,
+                    "response": response,
+                    "agent_used": "command_handler"
                 }
-            
-            response = "✅ Conversation history cleared. How can I help you?" if cleared else "❌ Failed to clear history."
-            return {
-                "success": cleared,
-                "response": response,
-                "agent_used": "command_handler"
-            }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "response": f"❌ Error clearing conversation: {str(e)}",
+                    "agent_used": "command_handler"
+                }
         
         elif command == "/stats":
-            stats = self._get_system_stats()
-            return {
-                "success": True,
-                "response": stats,
-                "agent_used": "command_handler"
-            }
+            try:
+                stats = self._get_system_stats()
+                return {
+                    "success": True,
+                    "response": stats,
+                    "agent_used": "command_handler"
+                }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "response": f"❌ Error retrieving system stats: {str(e)}",
+                    "agent_used": "command_handler"
+                }
         
         else:
             return {
@@ -270,32 +344,47 @@ Just type your question naturally - I'll route it to the right specialist!"""
     
     def _get_session_stats(self, session_id: str) -> Dict[str, Any]:
         """Get statistics for current session"""
-        conv_state = self.conversation_states.get(session_id, {})
-        history = self.redis.get_conversation_history(session_id)
-        
-        return {
-            "message_count": len(history),
-            "agent_switches": conv_state.get("agent_switches", 0),
-            "active_agent": conv_state.get("active_agent"),
-            "resolved_issues": len(conv_state.get("resolved_issues", [])),
-            "session_duration_minutes": self._calculate_session_duration(session_id)
-        }
+        try:
+            conv_state = self.conversation_states.get(session_id, {})
+            history = self.redis.get_conversation_history(session_id)
+            
+            return {
+                "message_count": len(history),
+                "agent_switches": conv_state.get("agent_switches", 0),
+                "active_agent": conv_state.get("active_agent"),
+                "resolved_issues": len(conv_state.get("resolved_issues", [])),
+                "session_duration_minutes": self._calculate_session_duration(session_id)
+            }
+        except Exception as e:
+            # Return default stats if there's an error
+            return {
+                "message_count": 0,
+                "agent_switches": 0,
+                "active_agent": None,
+                "resolved_issues": 0,
+                "session_duration_minutes": 0.0,
+                "error": str(e)
+            }
     
     def _calculate_session_duration(self, session_id: str) -> float:
         """Calculate session duration in minutes"""
-        session_data = self.redis.get_session(session_id)
-        if session_data and "created_at" in session_data:
-            created_at = datetime.fromisoformat(session_data["created_at"])
-            duration = datetime.now() - created_at
-            return round(duration.total_seconds() / 60, 1)
+        try:
+            session_data = self.redis.get_session(session_id)
+            if session_data and "created_at" in session_data:
+                created_at = datetime.fromisoformat(session_data["created_at"])
+                duration = datetime.now() - created_at
+                return round(duration.total_seconds() / 60, 1)
+        except Exception:
+            pass
         return 0.0
     
     def _get_detailed_session_status(self, session_id: str) -> str:
         """Get detailed session status"""
-        stats = self._get_session_stats(session_id)
-        conv_state = self.conversation_states.get(session_id, {})
-        
-        status = f"""📊 **Session Status for {session_id}**
+        try:
+            stats = self._get_session_stats(session_id)
+            conv_state = self.conversation_states.get(session_id, {})
+            
+            status = f"""📊 **Session Status for {session_id}**
 
 **Activity:**
 - Messages exchanged: {stats['message_count']}
@@ -310,50 +399,59 @@ Just type your question naturally - I'll route it to the right specialist!"""
 - Last active: {self._get_last_activity_time(session_id)}
 
 **Session Health:** ✅ Active and responsive"""
-        
-        return status
+            
+            return status
+        except Exception as e:
+            return f"❌ Error generating session status: {str(e)}"
     
     def _get_last_activity_time(self, session_id: str) -> str:
         """Get formatted last activity time"""
-        session_data = self.redis.get_session(session_id)
-        if session_data and "last_activity" in session_data:
-            last_activity = datetime.fromisoformat(session_data["last_activity"])
-            diff = datetime.now() - last_activity
-            
-            if diff.total_seconds() < 60:
-                return "Just now"
-            elif diff.total_seconds() < 3600:
-                return f"{int(diff.total_seconds() / 60)} minutes ago"
-            else:
-                return f"{int(diff.total_seconds() / 3600)} hours ago"
+        try:
+            session_data = self.redis.get_session(session_id)
+            if session_data and "last_activity" in session_data:
+                last_activity = datetime.fromisoformat(session_data["last_activity"])
+                diff = datetime.now() - last_activity
+                
+                if diff.total_seconds() < 60:
+                    return "Just now"
+                elif diff.total_seconds() < 3600:
+                    return f"{int(diff.total_seconds() / 60)} minutes ago"
+                else:
+                    return f"{int(diff.total_seconds() / 3600)} hours ago"
+        except Exception:
+            pass
         return "Unknown"
     
     def _get_conversation_summary(self, session_id: str) -> str:
         """Get conversation history summary"""
-        history = self.redis.get_conversation_history(session_id, limit=10)
-        
-        if not history:
-            return "📝 No conversation history found."
-        
-        summary = f"📝 **Recent Conversation** (last {len(history)} messages):\n\n"
-        
-        for i, msg in enumerate(history[-5:], 1):  # Show last 5 messages
-            role = "👤 Customer" if msg["role"] == "user" else "🤖 Assistant"
-            content = msg["content"][:100] + "..." if len(msg["content"]) > 100 else msg["content"]
-            timestamp = datetime.fromisoformat(msg["timestamp"]).strftime("%H:%M")
+        try:
+            history = self.redis.get_conversation_history(session_id, limit=10)
             
-            summary += f"**{i}. {role}** ({timestamp}):\n{content}\n\n"
-        
-        if len(history) > 5:
-            summary += f"... and {len(history) - 5} earlier messages"
-        
-        return summary
+            if not history:
+                return "📝 No conversation history found."
+            
+            summary = f"📝 **Recent Conversation** (last {len(history)} messages):\n\n"
+            
+            for i, msg in enumerate(history[-5:], 1):  # Show last 5 messages
+                role = "👤 Customer" if msg["role"] == "user" else "🤖 Assistant"
+                content = msg["content"][:100] + "..." if len(msg["content"]) > 100 else msg["content"]
+                timestamp = datetime.fromisoformat(msg["timestamp"]).strftime("%H:%M")
+                
+                summary += f"**{i}. {role}** ({timestamp}):\n{content}\n\n"
+            
+            if len(history) > 5:
+                summary += f"... and {len(history) - 5} earlier messages"
+            
+            return summary
+        except Exception as e:
+            return f"❌ Error retrieving conversation summary: {str(e)}"
     
     def _get_system_stats(self) -> str:
         """Get comprehensive system statistics"""
-        redis_stats = self.redis.get_stats()
-        
-        stats = f"""📈 **System Performance Statistics**
+        try:
+            redis_stats = self.redis.get_stats()
+            
+            stats = f"""📈 **System Performance Statistics**
 
 **Redis Cache:**
 - Memory usage: {redis_stats.get('used_memory_human', 'Unknown')}
@@ -372,50 +470,54 @@ Just type your question naturally - I'll route it to the right specialist!"""
 - Average response time: <2 seconds
 
 **System Health:** ✅ All systems operational"""
-        
-        return stats
+            
+            return stats
+        except Exception as e:
+            return f"❌ Error retrieving system statistics: {str(e)}"
     
     def _generate_suggestions(self, message: str, agent_used: str) -> List[str]:
         """Generate helpful suggestions based on the conversation"""
-        
-        suggestions = []
-        
-        if agent_used == "order_lookup":
-            suggestions.extend([
-                "Need help with returns? Ask about our return policy",
-                "Questions about shipping? I can explain our shipping options",
-                "Want to contact support directly? I can provide contact info"
-            ])
-        elif agent_used == "faq":
-            suggestions.extend([
-                "Have an order to check? Provide your order number",
-                "Need to track a package? Give me your order ID",
-                "Want to see all your orders? Provide your email address"
-            ])
-        
-        # Add contextual suggestions based on message content
-        message_lower = message.lower()
-        
-        if "return" in message_lower and agent_used != "faq":
-            suggestions.append("Ask about our return policy for detailed information")
-        
-        if "track" in message_lower and agent_used != "order_lookup":
-            suggestions.append("Provide your order number to track your package")
-        
-        if "contact" in message_lower or "support" in message_lower:
-            suggestions.append("Type '/help' to see all available commands")
-        
-        return suggestions[:3]  # Limit to 3 suggestions
+        try:
+            suggestions = []
+            
+            if agent_used == "order_lookup":
+                suggestions.extend([
+                    "Need help with returns? Ask about our return policy",
+                    "Questions about shipping? I can explain our shipping options",
+                    "Want to contact support directly? I can provide contact info"
+                ])
+            elif agent_used == "faq":
+                suggestions.extend([
+                    "Have an order to check? Provide your order number",
+                    "Need to track a package? Give me your order ID",
+                    "Want to see all your orders? Provide your email address"
+                ])
+            
+            # Add contextual suggestions based on message content
+            message_lower = message.lower()
+            
+            if "return" in message_lower and agent_used != "faq":
+                suggestions.append("Ask about our return policy for detailed information")
+            
+            if "track" in message_lower and agent_used != "order_lookup":
+                suggestions.append("Provide your order number to track your package")
+            
+            if "contact" in message_lower or "support" in message_lower:
+                suggestions.append("Type '/help' to see all available commands")
+            
+            return suggestions[:3]  # Limit to 3 suggestions
+        except Exception:
+            return []  # Return empty list if there's an error
     
     def end_session(self, session_id: str) -> Dict[str, Any]:
         """End a customer support session"""
-        
-        # Get final stats
-        final_stats = self._get_session_stats(session_id)
-        conv_state = self.conversation_states.get(session_id, {})
-        
-        # Generate session summary
-        summary = f"""📋 **Session Summary**
+        try:
+            # Get final stats
+            final_stats = self._get_session_stats(session_id)
+            conv_state = self.conversation_states.get(session_id, {})
+            
+            # Generate session summary
+            summary = f"""📋 **Session Summary**
 
 Thank you for using our customer support! Here's a summary of your session:
 
@@ -433,35 +535,49 @@ We'd love to hear about your experience! Your conversation has been saved for qu
 - Live Chat: Available 24/7 on our website
 
 Have a great day! 👋"""
-        
-        # Add farewell message to history
-        self.redis.add_message(session_id, "assistant", summary)
-        
-        # Clean up conversation state (but keep Redis data for analytics)
-        if session_id in self.conversation_states:
-            del self.conversation_states[session_id]
-        
-        return {
-            "success": True,
-            "summary": summary,
-            "final_stats": final_stats
-        }
+            
+            # Add farewell message to history
+            self.redis.add_message(session_id, "assistant", summary)
+            
+            # Clean up conversation state (but keep Redis data for analytics)
+            if session_id in self.conversation_states:
+                del self.conversation_states[session_id]
+            
+            return {
+                "success": True,
+                "summary": summary,
+                "final_stats": final_stats
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Error ending session: {str(e)}",
+                "summary": "Session ended with errors. Please contact support if you need assistance."
+            }
     
     def get_active_sessions(self) -> List[Dict[str, Any]]:
         """Get list of all active sessions"""
-        active_sessions = self.redis.list_active_sessions()
-        
-        session_details = []
-        for session_id in active_sessions:
-            session_data = self.redis.get_session(session_id)
-            if session_data:
-                stats = self._get_session_stats(session_id)
-                session_details.append({
-                    "session_id": session_id,
-                    "created_at": session_data.get("created_at"),
-                    "last_activity": session_data.get("last_activity"),
-                    "message_count": stats["message_count"],
-                    "duration_minutes": stats["session_duration_minutes"]
-                })
-        
-        return session_details
+        try:
+            active_sessions = self.redis.list_active_sessions()
+            
+            session_details = []
+            for session_id in active_sessions:
+                try:
+                    session_data = self.redis.get_session(session_id)
+                    if session_data:
+                        stats = self._get_session_stats(session_id)
+                        session_details.append({
+                            "session_id": session_id,
+                            "created_at": session_data.get("created_at"),
+                            "last_activity": session_data.get("last_activity"),
+                            "message_count": stats["message_count"],
+                            "duration_minutes": stats["session_duration_minutes"]
+                        })
+                except Exception:
+                    # Skip sessions that can't be processed
+                    continue
+            
+            return session_details
+        except Exception as e:
+            print(f"Error getting active sessions: {e}")
+            return []
