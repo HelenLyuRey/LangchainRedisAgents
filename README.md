@@ -75,15 +75,47 @@ python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
-3. **Start Redis server**
+
+3. **Set up podman machine**
+```bash
+# To check current podman machines
+podman machine list
+
+# If you don't have redis vm yet for this project, create one and start the machine
+podman machine init langchain-redis-agents-vm
+podman system connection default langchain-redis-agents-vm
+podman machine start langchain-redis-agents-vm
+
+```
+
+4. **Start Redis server**
 ```bash
 # Using Docker/Podman
-podman run -d --name redis-ai -p 6379:6379 redis:alpine
+podman run -d --name redis-langchain -p 6379:6379 redis:alpine redis-server --appendonly yes
 
 # Or install Redis locally
 # macOS: brew install redis && brew services start redis
 # Ubuntu: sudo apt install redis-server && sudo systemctl start redis
 ```
+If this not your first time running Redis container and you run into error
+Error: creating container storage: the container name "redis-langchain" is already in use by xxxx. You have to remove that container to be able to reuse that name: that name is already in use
+
+```bash
+# Verify Redis is running
+podman ps
+
+# Inspect the Container: If the container is running, you can inspect it to check if Redis is functioning properly
+podman logs redis-langchain
+
+# Remove the Existing Container: If you determine that you need to recreate the container (for example, if it's misconfigured), you can stop and remove the existing one
+podman stop redis-langchain
+podman rm redis-langchain
+
+# Can run the command to start a new Redis container again
+podman run -d --name redis-langchain -p 6379:6379 redis:alpine redis-server --appendonly yes
+
+```
+
 
 4. **Environment Configuration**
 Create a .env file with the following variables:

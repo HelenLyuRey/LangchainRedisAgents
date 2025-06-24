@@ -4,3 +4,19 @@
 2025-06-03 17:00:07,176 - app - INFO - Session created: session_1748941207_56aec004 for user: rey888@gmail.com
 2025-06-03 17:00:19,333 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
 2025-06-03 17:00:19,400 - app - INFO - Message processed - Session: session_1748941207_56aec004, Agent: faq, Time: 2.57s
+2025-06-24 15:06:11,077 - app - INFO - Customer Support App initialized
+2025-06-24 15:06:11,084 - app - INFO - Session created: session_1750748771_d4d88fd4 for user: demo@example.com
+2025-06-24 15:06:11,311 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2025-06-24 15:06:11,320 - app - INFO - Message processed - Session: session_1750748771_d4d88fd4, Agent: order_lookup, Time: 0.22s
+2025-06-24 15:06:14,397 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2025-06-24 15:06:14,409 - app - INFO - Message processed - Session: session_1750748771_d4d88fd4, Agent: order_lookup, Time: 0.07s
+2025-06-24 15:06:18,464 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2025-06-24 15:06:18,472 - app - INFO - Message processed - Session: session_1750748771_d4d88fd4, Agent: order_lookup, Time: 0.04s
+2025-06-24 15:06:20,540 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2025-06-24 15:06:20,550 - app - INFO - Message processed - Session: session_1750748771_d4d88fd4, Agent: faq, Time: 0.06s
+2025-06-24 15:06:23,597 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2025-06-24 15:06:23,605 - app - INFO - Message processed - Session: session_1750748771_d4d88fd4, Agent: faq, Time: 0.05s
+2025-06-24 15:06:25,681 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2025-06-24 15:06:25,685 - app - INFO - Message processed - Session: session_1750748771_d4d88fd4, Agent: order_lookup, Time: 0.08s
+2025-06-24 15:06:29,832 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 403 Forbidden"
+2025-06-24 15:06:29,839 - app - INFO - Message processed - Session: session_1750748771_d4d88fd4, Agent: faq, Time: 0.13s
